@@ -237,7 +237,7 @@ class MemoryData:
 
     Attributes:
         generated_stems (list[Stem]): List of all stems generated in this session
-        previous_context (list[str]): Previous conversation context/messages
+        intent_history (list[str]): Previous conversation context/messages
         stems_in_mix (list[Stem]): Stems currently included in the active mix
         context_song (ContextSong): Information about the current song context
         turn_index (int): Current turn number in the conversation

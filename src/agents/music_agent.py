@@ -60,7 +60,7 @@ class MusicAgentInput(BaseModel):
     current_mix_stem_diff: Optional[List[Dict[str, Any]]] = Field(
         default=[], description="List of currentmix stem diffs"
     )
-    previous_context: Optional[List[str]] = Field(
+    intent_history: Optional[List[str]] = Field(
         default=[], description="List of previous context"
     )
 
@@ -71,7 +71,7 @@ class MusicAgentOutput:
     text_prompts: list[dict]  # stem prompts
     target_music_info: dict  # bpm, scale, key
     selected_stem_diff: Stem  # user-chosen stem
-    previous_context: list[str]  # intent history
+    intent_history: list[str]  # intent history
     continue_stem_info: dict
     request_type: str  # start, add, continue, replace, remove
     unique_stems_info: Optional[Dict[str, Any]] = Field(
@@ -84,7 +84,7 @@ class MusicAgentOutput:
         text_prompts=None,
         target_music_info=None,
         selected_stem_diff=None,
-        previous_context=None,
+        intent_history=None,
         continue_stem_info=None,
         request_type=None,
         unique_stems_info=None,
@@ -92,7 +92,7 @@ class MusicAgentOutput:
         self.text_prompts = text_prompts or []
         self.target_music_info = target_music_info or {}
         self.selected_stem_diff = selected_stem_diff or {}
-        self.previous_context = previous_context or []
+        self.intent_history = intent_history or []
         self.continue_stem_info = continue_stem_info or {}
         self.request_type = request_type or ""
         self.unique_stems_info = unique_stems_info or {}
@@ -102,7 +102,7 @@ class MusicAgentOutput:
             # "intent_focused_prompt": self.intent_focused_prompt,
             "text_prompts": self.text_prompts,
             "target_music_info": self.target_music_info,
-            "previous_context": self.previous_context,
+            "intent_history": self.intent_history,
             "selected_stem_diff": self.selected_stem_diff,
             "continue_stem_info": self.continue_stem_info,
             "request_type": self.request_type,
@@ -113,7 +113,7 @@ class MusicAgentOutput:
         print("MusicAgentOutput:")
         # print(f"text_prompts: {self.text_prompts}")
         # print(f"target_music_info: {self.target_music_info}")
-        # print(f"previous_context: {self.previous_context}")
+        # print(f"intent_history: {self.intent_history}")
         # print(f"selected_stem_diff: {self.selected_stem_diff}")
         # print(f"continue_stem_info: {self.continue_stem_info}")
         # print(f"request_type: {self.request_type}")
@@ -124,7 +124,7 @@ class MusicAgentOutput:
         if self.selected_stem_diff:
             logger.debug("\n📊 Selected stem diff:\n %s", vars(self.selected_stem_diff))
         logger.debug("\n📊 Continue stem info:\n %s", self.continue_stem_info)
-        logger.debug("\n📊 Previous context:\n %s", self.previous_context)
+        logger.debug("\n📊 Previous context:\n %s", self.intent_history)
         logger.debug("\n📊 Total unique stems info:\n %s", self.unique_stems_info)
 
 
@@ -200,7 +200,7 @@ tool_schema = {
             },
             "reasoning": {
                 "type": "string",
-                "description": "CRITICAL: Follow [Category Determination Principles]. Step 1: Check if user mentions ANY specific instrument/sound in user_prompt or intent_focused_prompt. Step 2a: If YES → determine its category by analyzing its musical function (percussive→rhythm, bass→low, chordal→mid, melodic→high, effect→fx). ALWAYS use that category even if it's not in unique_stems_info (use 'add' if not found, 'continue' if found). This overrides unique_stems_info constraints. Step 2b: If NO explicit instrument → identify action keywords (생성해줘, add, 제거해줘, remove, etc.), then apply priority order logic (rhythm→low→mid→high→fx) to find first missing category FROM unique_stems_info (for total_section_count≥2). For 'remove': specify target stem from working_section. Only mention previous_context if current request is ambiguous.",
+                "description": "CRITICAL: Follow [Category Determination Principles]. Step 1: Check if user mentions ANY specific instrument/sound in user_prompt or intent_focused_prompt. Step 2a: If YES → determine its category by analyzing its musical function (percussive→rhythm, bass→low, chordal→mid, melodic→high, effect→fx). ALWAYS use that category even if it's not in unique_stems_info (use 'add' if not found, 'continue' if found). This overrides unique_stems_info constraints. Step 2b: If NO explicit instrument → identify action keywords (생성해줘, add, 제거해줘, remove, etc.), then apply priority order logic (rhythm→low→mid→high→fx) to find first missing category FROM unique_stems_info (for total_section_count≥2). For 'remove': specify target stem from working_section. Only mention intent_history if current request is ambiguous.",
             },
         },
         "required": [
@@ -326,9 +326,9 @@ async def generate_music_info(
             "section_role": prev_context_song_info.section_role,
         }
 
-    previous_context_for_llm = None
+    intent_history_for_llm = None
     if intent_history:
-        previous_context_for_llm = "\n".join(intent_history)
+        intent_history_for_llm = "\n".join(intent_history)
 
     current_mix_stem_diff_for_llm = None
     if working_section:
@@ -381,7 +381,7 @@ async def generate_music_info(
     messages = f"""Analyze this music request and generate appropriate stem information:
             * user_prompt: {user_prompt}
             * intent_focused_prompt: {intent_focused_prompt}
-            * previous_context: {previous_context_for_llm if previous_context_for_llm else "No previous context"}
+            * intent_history: {intent_history_for_llm if intent_history_for_llm else "No previous context"}
             * context_song_info: {context_for_llm if context_for_llm else "No previous context"}
             * working_section: {current_mix_stem_diff_for_llm if current_mix_stem_diff_for_llm else "No mix stems provided"}
             * unique_stems_info: {total_stem_diff_for_llm if total_stem_diff_for_llm else "No total stem history provided"}
@@ -449,7 +449,7 @@ async def generate_music_info(
                 output = MusicAgentOutput(
                     text_prompts=function_args.get("text_prompts"),
                     target_music_info=function_args.get("target_music_info", None),
-                    previous_context=intent_history,
+                    intent_history=intent_history,
                     selected_stem_diff=selected_stem_diff,
                     continue_stem_info=continue_stem_info,
                     request_type=function_args.get("request_type", None),
@@ -510,9 +510,9 @@ You are an expert AI assistant specializing in stem-based music analysis and gen
 
 [Inputs]
 - user_prompt, intent_focused_prompt
-- previous_context (reference only; never used to infer current mix state)
+- intent_history (reference only; never used to infer current mix state)
 - context_song_info (key/bpm/section_name/section_role)
-- working_section (authoritative current section stems; never infer from previous_context)
+- working_section (authoritative current section stems; never infer from intent_history)
 - unique_stems_info (unique stems list that are chosen ({song_id, category, instrument_name}))
 - total_section_count (total section count)
 - generated_stem (indexed list: {index, category, instrument_name, caption})
@@ -557,7 +557,7 @@ You are an expert AI assistant specializing in stem-based music analysis and gen
 - Single-instance rule (rhythm, low): only one each typically; explicit user requests override.
 - Core priority: rhythm → low → mid → high → fx.
 - Unique-stems limit applies ONLY when total_section_count ≥ 2. For total_section_count < 2, use standard priority with no limitation.
-- **CRITICAL CONSTRAINT**: Do NOT infer categories not present in unique_stems_info when using automatic priority-based selection. Never invent categories from captions or previous_context alone.
+- **CRITICAL CONSTRAINT**: Do NOT infer categories not present in unique_stems_info when using automatic priority-based selection. Never invent categories from captions or intent_history alone.
 - **CRITICAL EXCEPTION**: When user EXPLICITLY requests a specific instrument/sound (per [Category Determination Principles] line 535-544), generate that category EVEN IF it's not in unique_stems_info. Use 'add' type if not found in unique_stems_info, 'continue' if found.
 - Selection language (e.g., "2번째가 좋아", "I like option 3"): treat the selected category as already present in the current mix when determining the next recommendation.
 - Generation counts:
@@ -682,7 +682,7 @@ Decision rules by request_type:
        * If all categories present, generate first missing instrument pair with continue_stem_info
        * **CONSTRAINT**: In this case, ONLY generate categories present in unique_stems_info
   
-  - **When determining the next instrument**: Analyze previous_context, the updated working_section (including mentally added selection), and unique_stems_info to recommend the most musically appropriate instrument for the next category.
+  - **When determining the next instrument**: Analyze intent_history, the updated working_section (including mentally added selection), and unique_stems_info to recommend the most musically appropriate instrument for the next category.
   - Verification for 'continue': You MUST cite a concrete item from unique_stems_info as continue_stem_info {song_id, category, instrument_name}. If none exists for the chosen category/pair, classify as 'add'.
   - Continue subtypes:
     - **New section (when user requested new section)**:
@@ -702,7 +702,7 @@ Decision rules by request_type:
   - **CRITICAL FOR SELECTIONS**: When a user selects a stem (selected_stem_diff_uri is populated) with request_type='add' or 'continue', you MUST ALWAYS generate exactly one text_prompt for the NEXT missing category.
   - The selection itself does NOT complete the request - it triggers generation of the next recommendation.
   - Consider the selected category as mentally added to Updated_W_categories, then generate the first missing category by priority order.
-  - Analyze previous_context, working_section (including the mentally added selection), and unique_stems_info to determine the most appropriate next instrument.
+  - Analyze intent_history, working_section (including the mentally added selection), and unique_stems_info to determine the most appropriate next instrument.
 - remove / replace: zero prompts.
 - CRITICAL: If user selected a stem in Phase 1, that category is now in Updated_W_categories (Phase 3). Generate the NEXT missing category by priority order, NOT the selected category.
 - Prompts include genre/mood/instrumentation/themes only (exclude bpm/tempo/key).
@@ -720,7 +720,7 @@ You MUST return a JSON object compatible with the provided tool schema:
   - add/continue: exactly one item
     - **CRITICAL**: This applies to ALL add/continue cases, including when selected_stem_diff_uri is populated
     - When a selection is made with add/continue, generate text_prompt for the NEXT missing category (not the selected one)
-    - Determine the appropriate instrument by analyzing previous_context, Updated_W_categories, and unique_stems_info
+    - Determine the appropriate instrument by analyzing intent_history, Updated_W_categories, and unique_stems_info
   - replace/remove: empty array
   - **CRITICAL**: Each item MUST be: {category, text, uri:""}
     - **category** MUST be EXACTLY one of: "mixed", "rhythm", "low", "mid", "high", "fx" (NO other values allowed)

@@ -102,7 +102,7 @@
                     "chatText": "string",
                     "intentFocusedPrompt": "string",
                 },
-                "context": {"previous_context": ["string"]},
+                "intentHistory": ["string"],
                 "requestInformation": {
                     "globalMusicInformation": None,
                     "stemPrompts": [

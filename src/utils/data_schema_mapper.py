@@ -93,9 +93,7 @@ class DataSchemaMapper:
                     "createdAt": datetime.now().isoformat(),
                     "medias": [],
                     "chatMessage": None,
-                    "context": {
-                        "previousContext": [],
-                    },
+                    "intentHistory": [],
                     "requestInformation": {
                         "globalMusicInformation": None,
                         "stemPrompts": None,
@@ -206,7 +204,7 @@ class DataSchemaMapper:
             request["requestInformation"]["workingSectionIndex"] = output_data.get(
                 "working_section_index", 0
             )
-            request["context"]["previousContext"] = output_data.get("previous_context")
+            request["intentHistory"] = output_data.get("intent_history")
             request["requestInformation"]["stemPrompts"] = output_data.get(
                 "text_prompts"
             )
@@ -799,7 +797,7 @@ class DataSchemaStore:
             return {
                 "context_song_info": context_song_info,
                 "working_section_index": working_section_index,
-                "previous_context": request["context"].get("previousContext", []),
+                "intent_history": request["intentHistory"],
                 "turn_index": answers[0]["turnIndex"],
                 "mix_stem_diff": mix_stem_diff,
                 "generated_stem_diff": answers[0]["suggestedStems"],

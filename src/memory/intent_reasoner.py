@@ -51,7 +51,7 @@ def make_strategy_with_llm(
 
     user_msg = build_strategy_user_msg(
         user_prompt,
-        previous_context=prev_ctx,
+        intent_history=prev_ctx,
         intent_focused_prompt=previous_intent_focused_prompt,
         mix_lines=mix_lines,
         suggested_lines=suggested_lines,
@@ -300,7 +300,7 @@ Determine the `request_type` before setting any other flags:
 
 def build_strategy_user_msg(
     user_prompt: str,
-    previous_context: str = "",
+    intent_history: str = "",
     intent_focused_prompt: str = "",
     mix_lines: list = [],
     suggested_lines: list = [],
@@ -315,7 +315,7 @@ LAST MEMORY SNAPSHOT:
 {intent_focused_prompt}
 
 [PREVIOUS_USER_PROMPT]
-{previous_context}
+{intent_history}
 
 [MIX_STEMS]
 {json.dumps(mix_lines, indent=4) if mix_lines else "- none"}
