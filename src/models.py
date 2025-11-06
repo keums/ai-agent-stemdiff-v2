@@ -256,6 +256,7 @@ class MemoryData:
     turn_index: int
     working_section: list[Stem]  # try removing
     working_section_index: int
+    last_agent_response: str
 
     def __init__(
         self,
@@ -269,6 +270,7 @@ class MemoryData:
         turn_index=None,
         working_section=None,
         working_section_index=None,
+        last_agent_response=None,
     ):
         self.memory_id = memory_id
         self.user_prompt = user_prompt if user_prompt else ""
@@ -292,6 +294,7 @@ class MemoryData:
                 else []
             )
         )
+        self.last_agent_response = last_agent_response if last_agent_response else ""
 
     def print(self):
         print("MemoryData:")
@@ -306,6 +309,7 @@ class MemoryData:
         print(f"turn_index: {self.turn_index}")
         print(f"working_section: {self.working_section}")
         print(f"working_section_index: {self.working_section_index}")
+        print(f"last_agent_response: {self.last_agent_response}")
 
 
 class MemoryStrategy:
@@ -439,6 +443,53 @@ class MemorySelection:
         self.recent_memory = recent_memory
         self.selected_memory_ids = selected_memory_ids
         self.strategy = strategy
+
+
+class IntentResult:
+    """
+    Represents the result of intent classification for a user's message.
+
+    This class encapsulates the outcome of analyzing user intent, including
+    the type of request, a clarified version of their prompt, and any
+    immediate chat response.
+
+    Attributes:
+        request_type (str): Type of user request - one of:
+            ['chat', 'select', 'generate', 'remix', 'remove', 'replace', 'post']
+        intent_focused_prompt (str): Clarified version of the user's request
+            with full context from conversation history
+        response (str): Chat response message (non-empty only when request_type is 'chat')
+    """
+
+    request_type: str
+    intent_focused_prompt: str
+    response: str
+
+    def __init__(
+        self,
+        request_type: str = "chat",
+        intent_focused_prompt: str = "",
+        response: str = "",
+    ):
+        """
+        Initialize a new IntentResult instance.
+
+        Args:
+            request_type (str): Type of user request. Defaults to 'chat'.
+            intent_focused_prompt (str): Clarified version of user's request. Defaults to empty string.
+            response (str): Chat response (only for 'chat' type). Defaults to empty string.
+        """
+        self.request_type = request_type
+        self.intent_focused_prompt = intent_focused_prompt
+        self.response = response
+
+    def to_dict(self):
+        """Convert the IntentResult instance to a dictionary."""
+        return {
+            "request_type": self.request_type,
+            "intent_focused_prompt": self.intent_focused_prompt,
+            "response": self.response,
+        }
 
 
 class GenerateStemDiffOutput:

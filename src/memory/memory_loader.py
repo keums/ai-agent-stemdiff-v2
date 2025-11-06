@@ -35,64 +35,9 @@ else:
     logger.setLevel(logging.INFO)
 
 
-def _is_valid_schema(schema: dict) -> bool:
-    return schema["request"] and any(
-        ans for ans in schema["request"][0]["answers"] if ans["status"] != "error"
-    )
-
-
-def _load_schema(file_path: str) -> Optional[dict]:
-    try:
-        with open(file_path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def load_latest_valid_memory(folder: str) -> Optional[dict]:
-
-    files = sorted(
-        [
-            f
-            for f in os.listdir(folder)
-            if f.startswith("data_schema_") and f.endswith(".json")
-        ],
-        key=lambda x: os.path.getmtime(os.path.join(folder, x)),
-        reverse=True,
-    )
-
-    for file in files:
-        data = _load_schema(os.path.join(folder, file))
-        if data and _is_valid_schema(data):
-            return _extract_metadata(os.path.join(folder, file), data)
-    return None
-
-
-def load_top_n_valid_memories(
-    folder: str, candidate_memory_count: int
-) -> List[MemoryData]:
-    files = sorted(
-        [
-            f
-            for f in os.listdir(folder)
-            if f.startswith("data_schema_") and f.endswith(".json")
-        ],
-        key=lambda x: os.path.getmtime(os.path.join(folder, x)),
-        reverse=True,
-    )
-    valid_memories = []
-    for file in files:
-        if len(valid_memories) >= candidate_memory_count:
-            break
-        data = _load_schema(os.path.join(folder, file))
-        if data and _is_valid_schema(data):
-            valid_memories.append(_extract_metadata(os.path.join(folder, file), data))
-    return valid_memories
-
-
-def get_recent_valid_dialog_uuids(
+def get_recent_valid_dialog_memory(
     current_dialog_uuid: str, session_uuid: str, max_count: int = 10
-) -> List[str]:
+) -> MemoryData:
     logger.debug(f"session_uuid: {session_uuid}")
     dialog_uuids_in_session = cache_get(f"dialogs_in_session:{session_uuid}")
     logger.debug(f"dialog_uuids_in_session: {dialog_uuids_in_session}")
@@ -118,7 +63,18 @@ def get_recent_valid_dialog_uuids(
             valid_dialogs.append(dialog_uuid)
             if len(valid_dialogs) >= max_count:
                 break
-    return valid_dialogs
+        logger.debug(f"candidates_uuids: {valid_dialogs}")
+    if not valid_dialogs:
+        logger.debug("There is no valid memory")
+        return MemoryData()
+    else:
+        try:
+            recent_id = valid_dialogs[0]
+            recent_memory = load_memory_from_cache(recent_id)
+            return recent_memory
+        except Exception as e:
+            logger.info(f"Error loading memory from cache: {e}")
+            return MemoryData()
 
 
 def has_answer(dialog: dict) -> bool:
@@ -129,24 +85,6 @@ def has_answer(dialog: dict) -> bool:
 def no_errors(dialog: dict) -> bool:
     answers = dialog.get("answers", [])
     return all(ans.get("status") != "error" for ans in answers)
-
-
-def _extract_metadata(path: str, data: dict) -> MemoryData:
-    req = data["request"][0]
-    ans = next(ans for ans in req["answers"] if ans["status"] != "error")
-
-    memory_data = MemoryData(
-        memory_id=path,
-        user_prompt=req["chatMessage"]["chatText"],
-        intent_focused_prompt=req["chatMessage"].get("intentFocusedPrompt", ""),
-        intent_history=req.get("context", {}).get("previousContext", []),
-        chosen_sections=ans.get("mix", {}).get("mixData", {}).get("stems", []),
-        generated_stems=ans.get("suggestedStems", []),
-        context_song=req["requestInformation"].get("contextSongInfo", {}),
-        working_section_index=req["requestInformation"].get("workingSectionIndex", 0),
-    )
-
-    return memory_data
 
 
 async def extract_data_from_memory(
@@ -408,7 +346,7 @@ def load_memory_from_cache(memory_id: str) -> MemoryData:
         intent_focused_prompt=memory.get("chatMessage", {}).get(
             "intentFocusedPrompt", ""
         ),
-        intent_history=memory.get("context", {}).get("previousContext", []),
+        intent_history=memory.get("intentHistory", []),
         chosen_sections=[
             [
                 Stem(
@@ -459,4 +397,7 @@ def load_memory_from_cache(memory_id: str) -> MemoryData:
         working_section_index=memory.get("requestInformation", {}).get(
             "workingSectionIndex", 0
         ),
+        last_agent_response=memory.get("answers", [{}])[0]
+        .get("chatMessage", {})
+        .get("chatText", ""),
     )

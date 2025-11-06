@@ -177,7 +177,7 @@ async def generate_stem_diff(request: StemDiffRequest):
     user_id = "1234567890"
     # session_uuid = str(uuid.uuid4())
     #! FOR TEST ONLY
-    session_uuid = "e8c9d585-0730-4017-a0b2-69a8c73ab3g1"
+    session_uuid = "e8c9d585-0730-4017-a0b2-69a8c73ab6a1"
     remix_song_info = {
         # "remix_song_id": "u001917_let_it_go",
         "remix_song_id": "u000028_trouble",

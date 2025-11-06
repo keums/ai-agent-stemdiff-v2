@@ -26,7 +26,6 @@ import json
 import logging
 import os
 import time
-import traceback
 import uuid
 from datetime import datetime
 
@@ -41,18 +40,22 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 import tools.embedding.music_text_joint_embedding as music_text_joint_embedding
 import tools.embedding.text_embedding as text_embedding
 import tools.search.stem_search as search_stems_from_es
+from agents.intent_agent import intent_agent_router
 from agents.music_agent import generate_music_info
 from agents.reply_agent import reply_orchestrator
 from agents.reply_for_publish import reply_for_publish_song
 from common.cache import cache_get, cache_set
 from common.websocket import send_websocket_message
-from memory.memory_loader import extract_data_from_memory
+from memory.memory_loader import (
+    extract_data_from_memory,
+    get_recent_valid_dialog_memory,
+)
 from models import ContextSong, GenerateStemDiffOutput, Stem
 from tools.search.search_thumbnail import search_thumbnail
 from tools.search.stem_search import SearchStemOutput
-from utils.data_schema_mapper import get_data_schema_store
 from utils.get_stem_section_info import update_mix_stems
 
+CANDIDATE_MEMORY_COUNT = 15
 # Load environment variables
 logger = logging.getLogger(__name__)
 is_local = os.getenv("WEBSOCKET_API_ENDPOINT") is None
@@ -200,6 +203,55 @@ async def main(
 
     usage = []
     start_time = time.time()
+    # TODO CHECK LIST FOR NEXT STEP
+    # 1. Memory
+    # 2. Context info.
+    # 3. Block Prompts
+    # 4. selected_song_id
+    # 5. Block Prompt Agent
+    # 6. selected_block_prompt
+    # 6. Memory Agent
+    # 7. Prompt Stem Search
+    # 8. Context Song Search
+    # 9. Update Stems
+    # 10. Reply for Gen.
+
+    # * 🔍🔍 Read Recent memory
+    memory_data = get_recent_valid_dialog_memory(
+        dialog_uuid, session_uuid, CANDIDATE_MEMORY_COUNT
+    )
+
+    # * 🔍🔍 Intent Agent(Router)
+    # Example intent_result
+    # intent_result = IntentResult(
+    #     request_type="chat",
+    #     intent_focused_prompt="User is asking what the chatbot can do",
+    #     response="I can help you create music...",
+    # )
+    intent_result = await intent_agent_router(user_prompt, memory_data)
+
+    print(f"User request type: {intent_result.request_type}")
+    print(f"Intent focused prompt: {intent_result.intent_focused_prompt}")
+
+    # If it's a chat request, return the response immediately
+    if intent_result.request_type == "chat" and intent_result.response:
+        print(f"Chat response: {intent_result.response}")
+        #! NEED TO BE IMPLEMENTED
+        # TODO: Return chat response to user through websocket or appropriate channel
+        return
+
+    return
+    # TODO: 3. Contextual Agent
+    # TODO: 4. Context Prompt Agent
+    # TODO: 5. Block Prompt Agent
+    # TODO: 6. Memory Agent
+    # TODO: 7. Prompt Stem Search
+    # TODO: 8. Context Song Search
+    # TODO: 9. Update Stems
+    # TODO: 10. Reply for Gen.
+    # TODO: 10. Reply for Publish Song
+    # TODO: 10. Reply for Chat
+
     # Get related data from the memory
     try:
         memory_data, strategy, llm_usage, previous_working_section_index = (
@@ -796,9 +848,10 @@ def format_answer(
             "chatText": user_prompt,
             "intentFocusedPrompt": intent_focused_prompt,
         },
-        "context": {
-            "previousContext": intent_history,
-        },
+        # "context": {
+        #     "previousContext": intent_history,
+        # },
+        "intentHistory": intent_history,
         "requestInformation": {
             "globalMusicInformation": target_music_information,
             "stemPrompts": text_prompts,

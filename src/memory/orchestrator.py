@@ -4,12 +4,7 @@ from models import MemoryData, MemorySelection, MemoryStrategy
 
 # from .embedding_logger import log_selected_memory
 from .intent_reasoner import make_strategy_with_llm, select_best_memory_with_llm
-from .memory_loader import (
-    get_recent_valid_dialog_uuids,
-    load_memory_from_cache,
-    # load_top_n_valid_memories,
-    # memory_from_data_schema,
-)
+from .memory_loader import get_recent_valid_dialog_uuids, load_memory_from_cache
 
 CANDIDATE_MEMORY_COUNT = 15
 logger = logging.getLogger(__name__)

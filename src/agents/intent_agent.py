@@ -7,11 +7,227 @@ from typing import Any, Dict, List
 import openai
 from dotenv import load_dotenv
 
+from models import IntentResult, MemoryData
+
 # Load environment variables from .env file
 env_path = pathlib.Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
 
 
+def build_intent_router_system_msg():
+    return """
+You are an intent classification agent for a music creation chatbot. Your task is to understand the TRUE INTENT behind each user message by analyzing what the user ultimately wants to accomplish, not just matching keywords.
+
+## Classification Principles
+
+**Identify the PRIMARY action the user wants to take RIGHT NOW:**
+
+1. **chat** - User's primary goal is to obtain information, explanation, or have a conversation
+   - Asking questions about concepts, styles, or how things work
+   - Seeking clarification or explanation before taking action
+   - Social responses (greetings, thanks, acknowledgments)
+   - Examples: "What is jazz?", "Explain alternative rock to me", "How does this work?"
+   - **CRITICAL**: Even if user mentions future creation intent ("I want to make X, but what is X?"), if they're asking for explanation first, it's CHAT
+
+2. **select** - User wants to choose one option from previously presented alternatives
+   - References to specific choices, numbers, or ordinal positions
+   - Implies that options were already given in conversation history
+   - Examples: "the first one", "number 3", "I'll pick this", "use that stem"
+
+3. **generate** - User wants to create NEW music content
+   - Direct creation requests without referencing existing elements
+   - Requesting new stems, instruments, or musical elements
+   - Examples: "create a beat", "add drums", "make jazz music"
+   - Note: NOT generate if user is asking about it first (see chat)
+
+4. **remix** - User wants to modify existing music holistically
+   - Changing the overall arrangement, style, or feel of current mix
+   - Examples: "remix this", "change the vibe", "make it faster"
+
+5. **remove** - User wants to delete specific audio elements
+   - Eliminating existing stems from the current mix
+   - Examples: "remove the bass", "delete this stem", "take out drums"
+
+6. **replace** - User wants to swap one audio element with another
+   - Substituting an existing stem while keeping others
+   - Examples: "replace drums with percussion", "swap this for that"
+
+7. **post** - User indicates work completion and wants to finalize/publish
+   - Signals the end of the creative session
+   - Examples: "done", "publish this", "finalize the track"
+
+## Classification Strategy
+
+1. Read the ENTIRE user message to understand context
+2. Identify what the user wants to happen NEXT (not eventually)
+3. If multiple intents exist, prioritize by: post > remove/replace > remix > select > generate > chat
+4. However, if the PRIMARY sentence is a question seeking information, classify as CHAT regardless of other mentions
+
+## Example Reasoning
+
+- "I want to make alternative rock. What is alternative rock?" 
+  → PRIMARY: asking for explanation → CHAT
+
+- "What is jazz? I want to create it."
+  → PRIMARY: asking for explanation → CHAT
+
+- "Create alternative rock music"
+  → PRIMARY: direct creation request → GENERATE
+
+- "I'll go with the second option"
+  → PRIMARY: choosing from options → SELECT
+
+## Language Detection Rule (Applies to ALL outputs)
+
+**CRITICAL**: Detect the user's PRIMARY language by analyzing BOTH Intent History + Current Prompt together:
+- Look at the overall conversation pattern in Intent History
+- If most of the conversation has been in Korean, use Korean - even if the current prompt is "okay", "yes", or other short English words
+- If most of the conversation has been in English, use English
+- If Intent History is empty, follow the language of the current prompt
+- Examples:
+  * Intent History (Korean dominant) + Current: "okay" → Respond in KOREAN
+  * Intent History (Korean dominant) + Current: "첫번째" → Respond in KOREAN  
+  * Intent History (English dominant) + Current: "first one" → Respond in ENGLISH
+  * Intent History (empty) + Current: "얼터너티브 록이 뭐야?" → Respond in KOREAN
+
+## Output Requirements
+
+You must provide exactly 3 fields:
+
+1. **request_type**: One of [chat, select, generate, remix, remove, replace, post]
+
+2. **intent_focused_prompt**: 
+   - Restate the user's request clearly with full conversation context
+   - Make ambiguous references explicit using context from history
+   - Examples:
+     * "첫번째" → "세 가지 재즈 드럼 옵션 중 첫 번째를 선택하고 싶어"
+     * "first one" → "I want to select the first jazz drum option from three choices"
+     * "okay" (when agreeing to add bass) → "네, 제안된 베이스 스템을 현재 믹스에 추가하고 싶어"
+   
+3. **response**: 
+   - If request_type is "chat": Provide a helpful, informative answer
+   - Otherwise: Empty string ""
+"""
+
+
+async def intent_agent_router(
+    user_prompt: str, memory_data: MemoryData
+) -> IntentResult:
+    """
+    Intent Agent is responsible for determining the type of user request based on the user's prompt.
+    Uses modern structured output with JSON Schema.
+
+    Returns:
+        IntentResult object with three fields:
+        - request_type: One of (chat, remix, generate, select, remove, replace, post)
+        - intent_focused_prompt: Clarified version of user's request with full context
+        - response: Chat response (non-empty only when request_type is 'chat')
+
+        Example:
+            IntentResult(
+                request_type="chat",
+                intent_focused_prompt="User is asking what the chatbot can do",
+                response="I can help you create music..."
+            )
+            IntentResult(
+                request_type="generate",
+                intent_focused_prompt="User wants to create rock music",
+                response=""
+            )
+    """
+    system_prompt = build_intent_router_system_msg()
+
+    intent_history = memory_data.intent_history
+    last_agent_response = memory_data.last_agent_response
+    user_prompt_for_llm = f"""
+    Here is the user's prompt and intent history:
+    1.  **The User's Prompt:** "{user_prompt}"
+    2.  **Intent History:** {intent_history} # [most old request, ..., most recent request] sorted in order.
+    3.  **Last Agent Response:** {last_agent_response}
+    """
+
+    # Define JSON Schema for structured output
+    intent_schema = {
+        "type": "object",
+        "properties": {
+            "request_type": {
+                "type": "string",
+                "enum": [
+                    "chat",
+                    "remix",
+                    "generate",
+                    "select",
+                    "remove",
+                    "replace",
+                    "post",
+                ],
+                "description": "The type of user request",
+            },
+            "intent_focused_prompt": {
+                "type": "string",
+                "description": "A clarified version of the user's request with full context from conversation history. Always required.",
+            },
+            "response": {
+                "type": "string",
+                "description": "Response message for chat requests. Should contain the chat response when request_type is 'chat', empty string otherwise.",
+            },
+        },
+        "required": ["request_type", "intent_focused_prompt", "response"],
+        "additionalProperties": False,
+    }
+
+    try:
+        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt_for_llm},
+            ],
+            temperature=0.5,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "intent_classification",
+                    "strict": True,
+                    "schema": intent_schema,
+                },
+            },
+        )
+        content = response.choices[0].message.content
+        if content is None:
+            return IntentResult(
+                request_type="chat",
+                intent_focused_prompt=user_prompt,
+                response="I'm here to help you create music. What would you like to do?",
+            )
+        else:
+            result = json.loads(content)
+            request_type = result.get("request_type", "chat")
+            intent_focused_prompt = result.get("intent_focused_prompt", user_prompt)
+            response_text = result.get("response", "")
+
+            # If it's chat but response is empty, provide default
+            if request_type == "chat" and not response_text:
+                response_text = (
+                    "I'm here to help you create music. What would you like to do?"
+                )
+
+            return IntentResult(
+                request_type=request_type,
+                intent_focused_prompt=intent_focused_prompt,
+                response=response_text,
+            )
+    except Exception as e:
+        print(f"Intent Agent LLM call failed: {e}")
+        return IntentResult(
+            request_type="chat",
+            intent_focused_prompt=user_prompt,
+            response="I'm here to help you create music. What would you like to do?",
+        )
+
+
+# ------------------------------------------------------------ #
 def summarize_schema_for_llm(file_path: str) -> Dict[str, Any] | None:
     """
     Reads a data_schema JSON file and extracts a concise summary.
@@ -38,7 +254,7 @@ def summarize_schema_for_llm(file_path: str) -> Dict[str, Any] | None:
             "intent_focused_prompt": req_data.get("chatMessage", {}).get(
                 "intentFocusedPrompt"
             ),
-            "previous_context": req_data.get("context", {}).get("previousContext", []),
+            "intent_history": req_data.get("intentHistory", []),
             "current_mix_stems": [
                 {
                     "category": stem.get("category"),
@@ -103,7 +319,10 @@ def validate_latest_memory_context(
             temperature=0.5,
             response_format={"type": "json_object"},
         )
-        result = json.loads(response.choices[0].message.content)
+        content = response.choices[0].message.content
+        if content is None:
+            return False
+        result = json.loads(content)
         return result.get("is_sufficient", False)
     except Exception as e:
         print(f"Validator LLM call failed: {e}")
@@ -147,7 +366,8 @@ def select_best_memory_from_history(
             ],
             temperature=0.5,
         )
-        return response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        return content.strip() if content else ""
     except Exception as e:
         print(f"Selector LLM call failed: {e}")
         return summaries[0]["file_name"] if summaries else ""
