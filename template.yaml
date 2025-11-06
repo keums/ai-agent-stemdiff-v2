@@ -1,0 +1,682 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'AI Agent Stem Diff API - SAM Template'
+
+Globals:
+  Api:
+    BinaryMediaTypes:
+      - '*/*'
+    Cors:
+      AllowMethods: "'OPTIONS,POST,GET'"
+      AllowHeaders: "'Content-Type,Content-Length,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+      AllowOrigin: "'*'"
+  Function:
+    Timeout: 300
+    MemorySize: 1024
+    Runtime: python3.12
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+        OPENAI_API_KEY: !Ref OpenAIAPIKey
+        MEMCACHED_ENDPOINT: !Ref MemcachedEndpoint
+
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Environment name
+  OpenAIAPIKey:
+    Type: String
+    NoEcho: true
+    Description: OpenAI API Key
+  MusicTextEmbeddingApiUrl:
+    Type: String
+    Description: API URL for music text embedding
+    NoEcho: true
+  TextMusicEmbeddingApiUrl:
+    Type: String
+    Description: API URL for text music embedding
+    NoEcho: true
+  MusicEmbeddingApiUrl:
+    Type: String
+    Description: API URL for music embedding
+    NoEcho: true
+  CaptioningApiUrl:
+    Type: String
+    Description: API URL for captioning
+    NoEcho: true
+  ElasticCloudId: 
+    Type: String
+    Description: Elastic Cloud ID
+    NoEcho: true
+  ElasticPassword:
+    Type: String
+    Description: Elastic password
+    NoEcho: true
+  EsBlockIndex:
+    Type: String
+    Description: Elasticsearch block index
+    NoEcho: true
+  EsSongIndex:
+    Type: String
+    Description: Elasticsearch song index
+    NoEcho: true
+  EsEnvironmentalSoundIndex:
+    Type: String
+    Description: Elasticsearch environmental sound index
+    NoEcho: true
+  SeparateMusicSourceApiUrl:
+    Type: String
+    Description: API URL for separate music source
+    NoEcho: true
+  SegmentSectionApiUrl:
+    Type: String
+    Description: API URL for segment section
+    NoEcho: true
+  GenerateStemdiffApiUrl:
+    Type: String
+    Description: API URL for generate stemdiff
+    NoEcho: true
+  KeyDetectionApiUrl:
+    Type: String
+    Description: API URL for key detection
+    NoEcho: true
+  DetectMusicInstrumentApiUrl:
+    Type: String
+    Description: API URL for detect music instrument
+    NoEcho: true
+  MemcachedEndpoint:
+    Type: String
+    Description: Endpoint of the ElastiCache Memcached instance
+    NoEcho: true
+  WebSocketApiEndpoint:
+    Type: String
+    Description: WebSocket API endpoint
+    NoEcho: true
+  MixerApiUrl:
+    Type: String
+    Description: API URL for mixer
+    NoEcho: true
+  RootBlockObjectUrl:
+    Type: String
+    Description: Root block object URL
+    NoEcho: true
+  RootEnvSoundObjectUrl:
+    Type: String
+    Description: Root env sound object URL
+    NoEcho: true
+  AnthropicApiKey:
+    Type: String
+    Description: Anthropic API key
+    NoEcho: true
+  StemDiffReqeustHelperApiUrl: 
+    Type: String
+    Description: API URL for stem diff request helper
+    NoEcho: true
+  DialogApiUrl:
+    Type: String
+    Description: API URL for dialog
+    NoEcho: true
+  UserApiUrl:
+    Type: String
+    Description: API URL for user
+    NoEcho: true
+  EsUserSongIndex:
+    Type: String
+    Description: Elasticsearch user song index
+    NoEcho: true
+  EsUserBlockIndex:
+    Type: String
+    Description: Elasticsearch user block index
+    NoEcho: true
+  RootUserBlockObjectUri:
+    Type: String
+    Description: Root user block object URI
+    NoEcho: true
+  RootUserBlockObjectUrl:
+    Type: String
+    Description: Root user block object URL
+    NoEcho: true
+  SentryDsn:
+    Type: String
+    Description: Sentry DSN
+    NoEcho: true
+  RootThumbnailUrl:
+    Type: String
+    Description: Root thumbnail URL
+    NoEcho: true
+  ErrorAPIUrl:
+    Type: String
+    Description: Error API URL
+    NoEcho: true
+
+Resources:
+  ApplicationVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-VPC"
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ApplicationVPC
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-Public-Subnet"
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ApplicationVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-Private-Subnet-1"
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ApplicationVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-Private-Subnet-2"
+
+  # Internet Gateway for public subnet
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-IGW"
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref ApplicationVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # NAT Gateway for private subnets
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-NAT-GW"
+
+  # Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ApplicationVPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-Public-RT"
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ApplicationVPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-Private-RT"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # API Gateway
+  RESTApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub '${AWS::StackName}-rest-api'
+      StageName: !Ref Environment
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: NONE
+      EndpointConfiguration: REGIONAL
+
+  # WebSocket API
+  WebSocketApiGateway:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub '${AWS::StackName}-websocket-api'
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: '$request.body.action'
+
+  AgentFrontFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: agent_front_handler.lambda_handler
+      Runtime: python3.13
+      Timeout: 30
+      MemorySize: 1024
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          WEBSOCKET_API_ENDPOINT: !Ref WebSocketApiEndpoint
+          MAIN_HANDLER_FUNCTION_NAME: !Ref MainHandler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'lambda:InvokeFunction'
+              Resource: '*'
+      Events:
+        AgentFrontAPI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RESTApiGateway
+            Path: /agent
+            Method: post
+            Auth:
+              Authorizer: NONE
+        AgentFrontAPICORSOption:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RESTApiGateway
+            Path: /agent
+            Method: options
+            Auth:
+              Authorizer: NONE
+
+  MainHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src
+      Handler: main.lambda_handler
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 1024
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          WEBSOCKET_API_ENDPOINT: !Ref WebSocketApiEndpoint
+          OPENAI_API_KEY: !Ref OpenAIAPIKey
+          MUSIC_TEXT_EMBEDDING_API_URL: !Ref MusicTextEmbeddingApiUrl
+          TEXT_MUSIC_EMBEDDING_API_URL: !Ref TextMusicEmbeddingApiUrl
+          MUSIC_EMBEDDING_API_URL: !Ref MusicEmbeddingApiUrl
+          CAPTIONING_API_URL: !Ref CaptioningApiUrl
+          ELASTIC_CLOUD_ID: !Ref ElasticCloudId
+          ELASTIC_PASSWORD: !Ref ElasticPassword
+          ES_BLOCK_INDEX: !Ref EsBlockIndex
+          ES_SONG_INDEX: !Ref EsSongIndex
+          ES_ENVIRONMENTAL_SOUND_INDEX: !Ref EsEnvironmentalSoundIndex
+          STEM_DIFF_REQEUST_HELPER_API_URL: !Ref StemDiffReqeustHelperApiUrl
+          ROOT_BLOCK_OBJECT_URI: !Ref RootBlockObjectUrl
+          DIALOG_API_URL: !Ref DialogApiUrl
+          USER_API_URL: !Ref UserApiUrl
+          ROOT_THUMBNAIL_URL: !Ref RootThumbnailUrl
+          ES_USER_BLOCK_INDEX: !Ref EsUserBlockIndex
+          ES_USER_SONG_INDEX: !Ref EsUserSongIndex
+          RootThumbnailUrl: !Ref RootThumbnailUrl
+          ROOT_USER_BLOCK_OBJECT_URI: !Ref RootUserBlockObjectUri
+          ROOT_USER_BLOCK_OBJECT_URL: !Ref RootUserBlockObjectUrl
+          SENTRY_DSN: !Ref SentryDsn
+          ERROR_API_URL: !Ref ErrorAPIUrl
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'execute-api:ManageConnections'
+              Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApiGateway}/*
+            - Effect: Allow
+              Action:
+                - 's3:GetObject'
+              Resource: !Sub arn:aws:s3:::ai-agent-data-new/*
+            - Effect: Allow
+              Action:
+                - 's3:ListBucket'
+              Resource: !Sub arn:aws:s3:::ai-agent-data-new
+      
+  
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Lambda functions
+      VpcId: !Ref ApplicationVPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+
+  MemcachedCluster:
+    Type: AWS::ElastiCache::ServerlessCache
+    Properties:
+      Engine: memcached
+      ServerlessCacheName: !Sub "${AWS::StackName}-Memcached"
+      DailySnapshotTime: "04:00"  # 4 AM UTC
+      Description: "ElastiCache Serverless Memcached for MixAudio AI Agent"
+      SecurityGroupIds:
+        - !Ref MemcachedSecurityGroup
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-Memcached"
+
+  MemcachedSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ElastiCache Memcached
+      VpcId: !Ref ApplicationVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 11211
+          ToPort: 11213
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-Memcached-SG"
+
+  WebSocketConnectionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: websocket_connection
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Timeout: 30
+      MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          MEMCACHED_ENDPOINT: !Ref MemcachedEndpoint
+          WEBSOCKET_API_ENDPOINT: !Ref WebSocketApiEndpoint
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'execute-api:ManageConnections'
+              Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApiGateway}/*
+
+  WebSocketDisconnectionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: websocket_disconnection
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Timeout: 30
+      MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          MEMCACHED_ENDPOINT: !Ref MemcachedEndpoint
+          WEBSOCKET_API_ENDPOINT: !Ref WebSocketApiEndpoint
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'execute-api:ManageConnections'
+              Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApiGateway}/*
+
+  WebSocketAttachFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: websocket_attach
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Timeout: 30
+      MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          MEMCACHED_ENDPOINT: !Ref MemcachedEndpoint
+          WEBSOCKET_API_ENDPOINT: !Ref WebSocketApiEndpoint
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'execute-api:ManageConnections'
+              Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApiGateway}/*
+
+  WebSocketDefaultFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: websocket_default
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Timeout: 30
+      MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          MEMCACHED_ENDPOINT: !Ref MemcachedEndpoint
+          WEBSOCKET_API_ENDPOINT: !Ref WebSocketApiEndpoint
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'execute-api:ManageConnections'
+              Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApiGateway}/*
+
+  ConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketConnectionFunction.Arn}/invocations
+  
+  DisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDisconnectionFunction.Arn}/invocations
+
+  WebSocketAttachIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketAttachFunction.Arn}/invocations
+
+  WebSocketDefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDefaultFunction.Arn}/invocations
+
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApiGateway
+      RouteKey: $connect
+      AuthorizationType: NONE
+      OperationName: ConnectRoute
+      Target: !Join 
+        - /
+        - - integrations
+          - !Ref ConnectIntegration
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApiGateway
+      RouteKey: $disconnect 
+      AuthorizationType: NONE
+      OperationName: DisconnectRoute
+      Target: !Join 
+        - /
+        - - integrations
+          - !Ref DisconnectIntegration
+
+  WebSocketAttachRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApiGateway
+      RouteKey: attach
+      AuthorizationType: NONE
+      OperationName: WebSocketAttachRoute
+      Target: !Join 
+        - /
+        - - integrations
+          - !Ref WebSocketAttachIntegration
+
+  WebSocketDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApiGateway
+      RouteKey: $default
+      AuthorizationType: NONE
+      OperationName: WebSocketDefaultRoute
+      Target: !Join 
+        - /
+        - - integrations
+          - !Ref WebSocketDefaultIntegration
+
+  WebSocketConnectionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketConnectionFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApiGateway}/*/*
+
+  WebSocketAttachPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketAttachFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApiGateway}/*/*
+
+  WebSocketDefaultPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketDefaultFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApiGateway}/*/*
+
+  WebSocketDisconnectionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketDisconnectionFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApiGateway}/*/*
+
+  WebSocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - ConnectRoute
+      - DisconnectRoute
+      - WebSocketAttachRoute
+      - WebSocketDefaultRoute
+    Properties:
+      ApiId: !Ref WebSocketApiGateway
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: !Ref Environment
+      DeploymentId: !Ref WebSocketDeployment
+      ApiId: !Ref WebSocketApiGateway
+
+
+
+Outputs:
+  ApiGatewayUrl:
+    Description: 'API Gateway endpoint URL'
+    Value: !Sub 'https://${RESTApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-api-url'
+  
+  WebSocketUrl:
+    Description: 'WebSocket API endpoint URL'
+    Value: !Sub 'wss://${WebSocketApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-websocket-url'
+  

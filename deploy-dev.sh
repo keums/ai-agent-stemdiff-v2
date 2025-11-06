@@ -1,0 +1,1 @@
+sam validate && sam build && sam deploy
