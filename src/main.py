@@ -40,6 +40,7 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 import tools.embedding.music_text_joint_embedding as music_text_joint_embedding
 import tools.embedding.text_embedding as text_embedding
 import tools.search.stem_search as search_stems_from_es
+from agents.composition_agent import composition_agent
 from agents.intent_agent import intent_agent_router
 from agents.music_agent import generate_music_info
 from agents.reply_agent import reply_orchestrator
@@ -236,9 +237,48 @@ async def main(
     # If it's a chat request, return the response immediately
     if intent_result.request_type == "chat" and intent_result.response:
         print(f"Chat response: {intent_result.response}")
-        #! NEED TO BE IMPLEMENTED
+        #! NEED TO BE CHECKED
         # TODO: Return chat response to user through websocket or appropriate channel
-        return
+        request_answer = format_answer(
+            request_uuid,
+            memory_data.turn_index + 1,
+            session_uuid,
+            dialog_uuid,
+            user_prompt,
+            error_message=error_message,
+            working_section_index=memory_data.working_section_index,
+            intent_focused_prompt=intent_result.intent_focused_prompt,
+            intent_history=memory_data.intent_history.append(
+                intent_result.intent_focused_prompt
+            ),
+            chosen_sections=memory_data.chosen_sections,
+            context_song_info=memory_data.context_song,
+            reply=intent_result.response,
+        )
+
+        cache_set(f"request_answer:{dialog_uuid}", request_answer)
+
+        # send websocket result
+        data = {"status": "completed", "logs": [], "data": request_answer}
+        connection_id = cache_get(f"connection_id:{request_uuid}")
+        if connection_id is not None:
+            send_websocket_message(connection_id, data)
+            logger.info("Sent websocket result")
+
+        if send_backend_message:
+            try:
+                response = save_answer(request_answer)
+                print(response)
+            except Exception as e:
+                logger.info("Error saving answer: %s", e)
+                return handle_error(e, "save_answer", dialog_uuid, request_uuid)
+
+        return request_answer
+
+    if intent_result.request_type == "generate":
+        composition_result = await composition_agent(
+            intent_result.intent_focused_prompt, memory_data
+        )
 
     return
     # TODO: 3. Contextual Agent

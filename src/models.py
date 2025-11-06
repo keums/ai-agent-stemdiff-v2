@@ -504,3 +504,32 @@ class GenerateStemDiffOutput:
         return {
             "output_uris": self.output_uris,
         }
+
+
+class CompositionAgentOutput:
+    """Composition Agent에 대한 출력 스키마"""
+
+    start_from_scratch: bool
+    start_new_branch: bool
+    start_new_section: bool
+    add_new_stem: bool
+
+    def __init__(
+        self,
+        start_from_scratch=False,
+        start_new_branch=False,
+        start_new_section=False,
+        add_new_stem=False,
+    ):
+        self.start_from_scratch = start_from_scratch
+        self.start_new_branch = start_new_branch
+        self.start_new_section = start_new_section
+        self.add_new_stem = add_new_stem
+
+    def to_dict(self):
+        return {
+            "start_from_scratch": self.start_from_scratch,
+            "start_new_branch": self.start_new_branch,
+            "start_new_section": self.start_new_section,
+            "add_new_stem": self.add_new_stem,
+        }
